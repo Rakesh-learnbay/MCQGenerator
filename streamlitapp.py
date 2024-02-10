@@ -126,6 +126,7 @@ if st.session_state['quiz'] is not None:
                 matches += 1
         # Print the number of matches in the terminal
         print(matches)
+        print("hello")
         st.write(f"You have selected {matches} correct answers.")
         # Or print the number of matches in the app
         # st.write(matches)

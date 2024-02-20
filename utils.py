@@ -1,10 +1,15 @@
 import PyPDF2
 import json
 import traceback
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 def parse_file(file):
     if file.name.endswith(".pdf"):
         try:
-            pdf_reader=PyPDF2.PdfReader(file)
+            pdf_reader = PyPDF2.PdfReader(file)
             text = ""
             for page in pdf_reader.pages:
                 text += page.extract_text()
@@ -14,9 +19,8 @@ def parse_file(file):
     elif file.name.endswith(".txt"):
         return file.read().decode("utf-8")
     else:
-        raise Exception(
-            "Unsupported File Format. Only PDF and .Txt Files are supported"
-        )
+        raise Exception("Unsupported File Format. Only PDF and .Txt Files are supported")
+
 RESPONSE_JSON = {
     "1": {
         "no": "1",
@@ -41,6 +45,7 @@ RESPONSE_JSON = {
         "correct": "correct answer",
     },
 }
+
 def get_table_data(quiz_str):
     try:
         quiz_dict = json.loads(quiz_str)

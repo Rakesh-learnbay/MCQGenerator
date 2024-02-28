@@ -1,25 +1,34 @@
 import PyPDF2
 import json
-import traceback
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
+
 def parse_file(file):
+    MAX_TOKENS = 16384
     if file.name.endswith(".pdf"):
         try:
             pdf_reader = PyPDF2.PdfReader(file)
             text = ""
             for page in pdf_reader.pages:
                 text += page.extract_text()
-            return text
+
+            # Split the text into chunks of maximum token length
+            chunked_text = [text[i:i + MAX_TOKENS] for i in range(0, len(text), MAX_TOKENS)]
+
+            return chunked_text
         except PyPDF2.utils.PdfReadError:
             raise Exception("Error reading the PDF file.")
     elif file.name.endswith(".txt"):
-        return file.read().decode("utf-8")
+        text = file.read().decode("utf-8")
+        # Split the text into chunks of maximum token length
+        chunked_text = [text[i:i + MAX_TOKENS] for i in range(0, len(text), MAX_TOKENS)]
+        return chunked_text
     else:
         raise Exception("Unsupported File Format. Only PDF and .Txt Files are supported")
+
 
 RESPONSE_JSON = {
     "1": {
@@ -45,6 +54,7 @@ RESPONSE_JSON = {
         "correct": "correct answer",
     },
 }
+
 
 def get_table_data(quiz_str):
     try:

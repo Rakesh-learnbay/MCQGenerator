@@ -8,8 +8,10 @@ from dotenv import load_dotenv
 from langchain_openai import AzureOpenAIEmbeddings, AzureChatOpenAI
 import pandas as pd
 import traceback
-from utils import parse_file, RESPONSE_JSON, get_table_data
 import os
+
+# Importing parse_file and RESPONSE_JSON from utils.py
+from utils import parse_file, RESPONSE_JSON, get_table_data
 
 load_dotenv()
 
@@ -20,12 +22,6 @@ OPENAI_API_MODEL = os.getenv("OPENAI_API_MODEL")
 OPENAI_API_DEPLOYMENT = os.getenv("OPENAI_API_DEPLOYMENT")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_API_TEMPERATURE = os.getenv("OPENAI_API_TEMPERATURE")
-# api_base = "https://openai-cogbooks.openai.azure.com/"
-# model_name = "gpt-35-turbo-16k"
-# model_version = "0613"
-# deployment = "gpt-35-turbo-16k-CBSIR"
-# deployment_type = "Standard"
-
 
 llm = AzureChatOpenAI(
         openai_api_version=OPENAI_API_VERSION,
@@ -90,42 +86,49 @@ tone = st.text_input("Insert Quiz Tone", max_chars=100, placeholder="simple")
 if st.button("Create MCQs") and uploaded_file is not None and mcq_count:
     with st.spinner(".."):
         try:
-            text = parse_file(uploaded_file)
-            response = generate_evaluate_chain(
-                {
-                    "text": text,
-                    "number": mcq_count,
-                    "grade": grade,
-                    "tone": tone,
-                    "response_json": json.dumps(RESPONSE_JSON)
-                }
-            )
+            # Using parse_file function from utils.py
+            text_chunks = parse_file(uploaded_file)
+            responses = []
+            for chunk in text_chunks:
+                response = generate_evaluate_chain(
+                    {
+                        "text": chunk,
+                        "number": mcq_count,
+                        "grade": grade,
+                        "tone": tone,
+                        "response_json": json.dumps(RESPONSE_JSON)
+                    }
+                )
+                responses.append(response)
         except Exception as e:
             traceback.print_exception(type(e), e, e.__traceback__)
             st.error("Error occurred while generating MCQs.")
         else:
-            if isinstance(response, dict):
-                st.session_state['quiz'] = response.get("quiz", None)
+            if isinstance(responses, list):
+                st.session_state['quiz'] = [resp.get("quiz", None) for resp in responses]
                 st.session_state['correct_answers'] = []  # Reset correct_answers when a new quiz is created
 
 if st.session_state['quiz'] is not None:
-    table_data = get_table_data(st.session_state['quiz'])
-    print(table_data)
-    with st.form(key="quiz_form"):
-        for i, data in enumerate(table_data):
-            st.write(f"{i + 1}. {data['MCQ']}")
-            options = data['Choices'].split(' | ')
-            correct_option = data['Correct']
-            selected_option = st.radio("", options, key=f"question {i}", index=None)
-        submit = st.form_submit_button("Submit answers")
+    for quiz in st.session_state['quiz']:
+        table_data = get_table_data(quiz)
+        if table_data:
+            with st.form(key="quiz_form"):
+                for i, data in enumerate(table_data):
+                    st.write(f"{i + 1}. {data['MCQ']}")
+                    options = data['Choices'].split(' | ')
+                    correct_option = data['Correct']
+                    selected_option = st.radio("", options, key=f"question {i}", index=None)
+                submit = st.form_submit_button("Submit answers")
 
-    if submit:
-        user_answers = [str(st.session_state[f"question {i}"]) for i in range(len(table_data))]
-        print(user_answers)
-        correct_answers = [str(data['Correct']) for data in table_data]
-        print(correct_answers)
-        matches = 0
-        for i in range(len(correct_answers)):
-            if correct_answers[i] in user_answers[i]:
-                matches += 1
-        st.write(f"You have selected {matches} correct answers.")
+            if submit:
+                user_answers = [str(st.session_state[f"question {i}"]) for i in range(len(table_data))]
+                print(user_answers)
+                correct_answers = [str(data['Correct']) for data in table_data]
+                print(correct_answers)
+                matches = 0
+                for i in range(len(correct_answers)):
+                    if correct_answers[i] in user_answers[i]:
+                        matches += 1
+                st.write(f"You have selected {matches} correct answers.")
+        else:
+            st.write("Error occurred while processing the quiz.")

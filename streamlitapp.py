@@ -1,17 +1,13 @@
-import json
 import streamlit as st
-from langchain.llms import OpenAI
+from langchain_openai import AzureChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from langchain.chains import SequentialChain
 from dotenv import load_dotenv
-from langchain_openai import AzureOpenAIEmbeddings, AzureChatOpenAI
-import pandas as pd
 import traceback
 import os
 
-# Importing parse_file and RESPONSE_JSON from utils.py
-from utils import parse_file, RESPONSE_JSON, get_table_data
+# Importing parse_file from utils.py
+from utils import parse_file
 
 load_dotenv()
 
@@ -24,111 +20,83 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_API_TEMPERATURE = os.getenv("OPENAI_API_TEMPERATURE")
 
 llm = AzureChatOpenAI(
-        openai_api_version=OPENAI_API_VERSION,
-        azure_endpoint=OPENAI_API_ENDPOINT,
-        model=OPENAI_API_MODEL,
-        azure_deployment=OPENAI_API_DEPLOYMENT,
-        api_key= OPENAI_API_KEY,
-        temperature=OPENAI_API_TEMPERATURE
-        )
-
-template = """
-Text:{text}
-You are an expert MCQ maker. Given the above text, it is your job to \
-create a quiz  of {number} multiple choice questions for grade {grade} students in {tone} tone. 
-Make sure the questions are not repeated and check all the questions to be conforming the text as well.
-Make sure to format your response like  RESPONSE_JSON below  and use it as a guide. \
-Ensure to make {number} MCQs
-### RESPONSE_JSON
-{response_json}
-"""
-
-quiz_generation_prompt = PromptTemplate(
-    input_variables=["text", "number", "grade", "tone", "response_json"],
-    template=template
+    openai_api_version=OPENAI_API_VERSION,
+    azure_endpoint=OPENAI_API_ENDPOINT,
+    model=OPENAI_API_MODEL,
+    azure_deployment=OPENAI_API_DEPLOYMENT,
+    api_key=OPENAI_API_KEY,
+    temperature=OPENAI_API_TEMPERATURE
 )
 
-quiz_chain = LLMChain(llm=llm, prompt=quiz_generation_prompt, output_key="quiz", verbose=True)
+intro_generation_prompt = PromptTemplate(
+    input_variables=["text"],
+    template="""
+    You are tasked with providing a concise introduction that encapsulates the main points of the following text:
 
-template = """
-You are an expert English grammarian and writer. Given a Multiple Choice Quiz for {grade} grade students.\
-You need to evaluate the complexity of the question and give a complete analysis of the quiz if the students
-will be able to understand the questions and answer them. Only use at max 50 words for complexity analysis. 
-if the quiz is not at par with the cognitive and analytical abilities of the students,\
-update the quiz questions which need to be changed  and change the tone such that it perfectly fits the student abilities
-Quiz_MCQs:
-{quiz}
+    {text}
 
-Critique from an expert English Writer of the above quiz:
-"""
+    Generate an introduction of up to 50 words that summarizes the key information and significance of the text.
 
-quiz_evaluation_prompt = PromptTemplate(input_variables=["grade", "quiz"], template=template)
-review_chain = LLMChain(llm=llm, prompt=quiz_evaluation_prompt, output_key="review", verbose=True)
+    ### Introduction:
+    """
+)
 
-generate_evaluate_chain = SequentialChain(chains=[quiz_chain, review_chain],
-                                          input_variables=["text", "number", "grade", "tone", "response_json"],
-                                          output_variables=["quiz", "review"], verbose=True)
+final_intro_generation_prompt = PromptTemplate(
+    input_variables=["introduction"],
+    template="""
+    You have generated an introduction that encapsulates the main points of the text:
 
-st.title("MCQs Creator App")
+    {introduction}
 
-if 'quiz' not in st.session_state:
-    st.session_state['quiz'] = None
-if 'user_answers' not in st.session_state:
-    st.session_state['user_answers'] = {}
-if 'correct_answers' not in st.session_state:
-    st.session_state['correct_answers'] = []
+    Now, based on this introduction, craft a final introduction that succinctly summarizes the key information and significance of the text. The final introduction should be between 20 to 50 words, ensuring it provides a clear and comprehensive overview without being fragmented or incomplete.
+
+    ### Final Introduction:
+    """
+)
+
+intro_chain = LLMChain(llm=llm, prompt=intro_generation_prompt, output_key="introduction", verbose=True)
+final_intro_chain = LLMChain(llm=llm, prompt=final_intro_generation_prompt, output_key="finalIntroduction", verbose=True)
+
+st.title("Text Summarization App")
+
+if 'final_introduction' not in st.session_state:
+    st.session_state['final_introduction'] = None
 
 uploaded_file = st.file_uploader("Upload a PDF or txt file")
-mcq_count = st.number_input("No. of MCQs", min_value=3, max_value=50)
-grade = st.number_input("Insert Grade", min_value=1, max_value=10)
-tone = st.text_input("Insert Quiz Tone", max_chars=100, placeholder="simple")
 
-if st.button("Create MCQs") and uploaded_file is not None and mcq_count:
+if st.button("Generate Introduction") and uploaded_file is not None:
     with st.spinner(".."):
         try:
-            # Using parse_file function from utils.py
-            text_chunks = parse_file(uploaded_file)
-            responses = []
-            for chunk in text_chunks:
-                response = generate_evaluate_chain(
-                    {
-                        "text": chunk,
-                        "number": mcq_count,
-                        "grade": grade,
-                        "tone": tone,
-                        "response_json": json.dumps(RESPONSE_JSON)
-                    }
-                )
-                responses.append(response)
+            # Using parse_file function from utils.py to extract text from the PDF
+            parsed_text = parse_file(uploaded_file)
+            full_text = " ".join(parsed_text)
+
+            # Split full text into chunks
+            chunk_size = 16384
+            chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+
+            # Generate initial introduction for each chunk
+            introductions = []
+            for chunk in chunks:
+                introduction = intro_chain({"text": chunk})["introduction"].strip()
+                introductions.append(introduction)
+
+            # Concatenate introductions into a single string
+            combined_intro = " ".join(introductions)
+
+            # Generate final introduction from combined introduction
+            final_introduction = final_intro_chain({"introduction": combined_intro})["finalIntroduction"].strip()
+
+            # Ensure final introduction is no longer than 50 words
+            final_intro_words = final_introduction.split(" ")[:50]
+            final_introduction = " ".join(final_intro_words)
+
+            st.session_state['final_introduction'] = final_introduction
         except Exception as e:
             traceback.print_exception(type(e), e, e.__traceback__)
-            st.error("Error occurred while generating MCQs.")
-        else:
-            if isinstance(responses, list):
-                st.session_state['quiz'] = [resp.get("quiz", None) for resp in responses]
-                st.session_state['correct_answers'] = []  # Reset correct_answers when a new quiz is created
+            st.error("Error occurred while generating introduction.")
 
-if st.session_state['quiz'] is not None:
-    for quiz in st.session_state['quiz']:
-        table_data = get_table_data(quiz)
-        if table_data:
-            with st.form(key="quiz_form"):
-                for i, data in enumerate(table_data):
-                    st.write(f"{i + 1}. {data['MCQ']}")
-                    options = data['Choices'].split(' | ')
-                    correct_option = data['Correct']
-                    selected_option = st.radio("", options, key=f"question {i}", index=None)
-                submit = st.form_submit_button("Submit answers")
-
-            if submit:
-                user_answers = [str(st.session_state[f"question {i}"]) for i in range(len(table_data))]
-                print(user_answers)
-                correct_answers = [str(data['Correct']) for data in table_data]
-                print(correct_answers)
-                matches = 0
-                for i in range(len(correct_answers)):
-                    if correct_answers[i] in user_answers[i]:
-                        matches += 1
-                st.write(f"You have selected {matches} correct answers.")
-        else:
-            st.write("Error occurred while processing the quiz.")
+# Printing final introduction
+if st.session_state['final_introduction'] is not None:
+    st.write("Generated Final Introduction:")
+    st.write(st.session_state['final_introduction'])

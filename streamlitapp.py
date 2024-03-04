@@ -28,75 +28,59 @@ llm = AzureChatOpenAI(
     temperature=OPENAI_API_TEMPERATURE
 )
 
-intro_generation_prompt = PromptTemplate(
-    input_variables=["text"],
+# Prompt template for summarizing the entire text
+summary_generation_prompt = PromptTemplate(
+    input_variables=["texts"],
     template="""
-    You are tasked with providing a concise introduction that encapsulates the main points of the following text:
+    You are provided with summaries of multiple text chunks extracted from a PDF file.
 
-    {text}
+    The summaries of individual chunks are as follows:
 
-    Generate an introduction of up to 50 words that summarizes the key information and significance of the text.
+    {texts}
 
-    ### Introduction:
+    Your task is to generate a consolidated summary that comprehensively analyzes each line and provides a detailed explanation of the content. Ensure that the consolidated summary encapsulates all key points, ideas, and details discussed in the entire text.
+
+    Analyze each line of the provided summaries to understand the context and meaning. Focus on identifying important concepts, relationships, and insights conveyed in the text.
+
+    Based on this detailed analysis, craft a consolidated summary that exceeds 200 words. Include explanations, interpretations, and connections between different parts of the text to provide a comprehensive overview.
+
+    ### Consolidated Summary:
     """
 )
 
-final_intro_generation_prompt = PromptTemplate(
-    input_variables=["introduction"],
-    template="""
-    You have generated an introduction that encapsulates the main points of the text:
+summary_chain = LLMChain(llm=llm, prompt=summary_generation_prompt, output_key="summary", verbose=True)
 
-    {introduction}
+st.title("PDF Summarization App")
 
-    Now, based on this introduction, craft a final introduction that succinctly summarizes the key information and significance of the text. The final introduction should be between 20 to 50 words, ensuring it provides a clear and comprehensive overview without being fragmented or incomplete.
+if 'file_summary' not in st.session_state:
+    st.session_state['file_summary'] = []
 
-    ### Final Introduction:
-    """
-)
+uploaded_file = st.file_uploader("Upload a PDF file")
 
-intro_chain = LLMChain(llm=llm, prompt=intro_generation_prompt, output_key="introduction", verbose=True)
-final_intro_chain = LLMChain(llm=llm, prompt=final_intro_generation_prompt, output_key="finalIntroduction", verbose=True)
-
-st.title("Text Summarization App")
-
-if 'final_introduction' not in st.session_state:
-    st.session_state['final_introduction'] = None
-
-uploaded_file = st.file_uploader("Upload a PDF or txt file")
-
-if st.button("Generate Introduction") and uploaded_file is not None:
+if st.button("Generate Summary") and uploaded_file is not None:
     with st.spinner(".."):
         try:
             # Using parse_file function from utils.py to extract text from the PDF
             parsed_text = parse_file(uploaded_file)
-            full_text = " ".join(parsed_text)
 
-            # Split full text into chunks
-            chunk_size = 16384
-            chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+            # Generate summary for each chunk of text
+            summaries = []
+            max_context_length = 16384
+            current_context_length = 0
+            for chunk in parsed_text:
+                summary = summary_chain({"texts": summaries + [chunk]})["summary"].strip()
+                current_context_length += len(summary.split())
+                if current_context_length <= max_context_length:
+                    summaries.append(summary)
+                else:
+                    break
 
-            # Generate initial introduction for each chunk
-            introductions = []
-            for chunk in chunks:
-                introduction = intro_chain({"text": chunk})["introduction"].strip()
-                introductions.append(introduction)
-
-            # Concatenate introductions into a single string
-            combined_intro = " ".join(introductions)
-
-            # Generate final introduction from combined introduction
-            final_introduction = final_intro_chain({"introduction": combined_intro})["finalIntroduction"].strip()
-
-            # Ensure final introduction is no longer than 50 words
-            final_intro_words = final_introduction.split(" ")[:50]
-            final_introduction = " ".join(final_intro_words)
-
-            st.session_state['final_introduction'] = final_introduction
+            st.session_state['file_summary'] = summaries
         except Exception as e:
             traceback.print_exception(type(e), e, e.__traceback__)
-            st.error("Error occurred while generating introduction.")
+            st.error("Error occurred while generating summary.")
 
-# Printing final introduction
-if st.session_state['final_introduction'] is not None:
-    st.write("Generated Final Introduction:")
-    st.write(st.session_state['final_introduction'])
+# Printing the generated consolidated summary
+if st.session_state['file_summary']:
+    st.write("Generated Consolidated Summary:")
+    st.write(st.session_state['file_summary'][-1])  # Displaying the last summary in the list

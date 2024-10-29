@@ -1,141 +1,136 @@
-import json
 import streamlit as st
-from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from langchain.chains import SequentialChain
-from langchain.callbacks import get_openai_callback
 from dotenv import load_dotenv
-import pandas as pd
+from langchain_openai import AzureChatOpenAI
 import traceback
-from utils import parse_file, RESPONSE_JSON, get_table_data
+import os
+import random
+
+
+from utils import parse_file
+
 load_dotenv()
 
-llm=OpenAI(model_name="gpt-3.5-turbo", temperature=0)
 
-template="""
-Text:{text}
-You are an expert MCQ maker. Given the above text, it is your job to \
-create a quiz  of {number} multiple choice questions for grade {grade} students in {tone} tone. 
-Make sure the questions are not repeated and check all the questions to be conforming the text as well.
-Make sure to format your response like  RESPONSE_JSON below  and use it as a guide. \
-Ensure to make {number} MCQs
-### RESPONSE_JSON
-{response_json}
+OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION")
+OPENAI_API_ENDPOINT = os.getenv("OPENAI_API_ENDPOINT")
+OPENAI_API_MODEL = os.getenv("OPENAI_API_MODEL")
+OPENAI_API_DEPLOYMENT = os.getenv("OPENAI_API_DEPLOYMENT")
+OPENAI_API_TEMPERATURE = os.getenv("OPENAI_API_TEMPERATURE")
 
-"""
 
-quiz_generation_prompt = PromptTemplate(
-    input_variables=["text", "number", "grade", "tone", "response_json"],
-    template=template
-
+llm = AzureChatOpenAI(
+    openai_api_version=OPENAI_API_VERSION,
+    azure_endpoint=OPENAI_API_ENDPOINT,
+    model=OPENAI_API_MODEL,
+    azure_deployment=OPENAI_API_DEPLOYMENT,
+    api_key=OPENAI_API_KEY,
+    temperature=OPENAI_API_TEMPERATURE
 )
 
 
-quiz_chain=LLMChain(llm=llm, prompt=quiz_generation_prompt, output_key="quiz", verbose=True)
+cumulative_lesson_plan_prompt_template = """
+Chapters Selected: {chapters}
+As an expert educator, you will create a unified lesson plan by including the key concepts from each selected chapter. Follow the instructions below carefully:
 
+1. If there are 2 selected chapters, include 3 points under each section for each chapter.
+2. If there are more than 2 selected chapters, include 2 points under each section for each chapter.
 
-template="""
-You are an expert english grammarian and writer. Given a Multiple Choice Quiz for {grade} grade students.\
-You need to evaluate the complexity of teh question and give a complete analysis of the quiz if the students
-will be able to unserstand the questions and answer them. Only use at max 50 words for complexity analysis. 
-if the quiz is not at par with the cognitive and analytical abilities of the students,\
-update teh quiz questions which needs to be changed  and change the tone such that it perfectly fits the student abilities
-Quiz_MCQs:
-{quiz}
+Ensure each chapter contributes equally within each section. Avoid focusing on one chapter more than the others. Here is the structure:
 
-Critique from an expert English Writer of the above quiz:
+1. **Bridge-In**: Provide an introduction that integrates ideas from each selected chapter, ensuring each chapter is represented with {bridge_points} key points.
+2. **Objectives**: Outline learning objectives with {objectives_points} key points per chapter, reflecting each chapter’s main ideas equally.
+3. **Pre-assessment**: List questions or scenarios that include {pre_assessment_points} key points per chapter to assess foundational knowledge.
+4. **Participatory Teaching Activities**: Design activities with {activities_points} key points per chapter, each activity incorporating concepts from all selected chapters.
+5. **Post-assessment**: Provide assessment questions with {post_assessment_points} key points per chapter to evaluate understanding across all topics.
+6. **Summary/Closure**: Summarize the lesson plan by covering {summary_points} key points per chapter, explaining how all chapters interrelate to give a holistic view.
+
+Do not use subsections. Instead, blend each chapter’s concepts seamlessly within each section, ensuring balanced representation of all selected chapters.
 """
 
-quiz_evaluation_prompt=PromptTemplate(input_variables=["grade", "quiz"], template=template)
-review_chain=LLMChain(llm=llm, prompt=quiz_evaluation_prompt, output_key="review", verbose=True)
 
-generate_evaluate_chain=SequentialChain(chains=[quiz_chain, review_chain], input_variables=["text", "number", "grade", "tone", "response_json"],
-                                        output_variables=["quiz", "review"], verbose=True,)
 
-st.title("MCQs Creator Application with LangChain 🦜⛓️")
+def calculate_points(num_chapters):
+    if num_chapters <= 2:
+        return 3  # For 2 or fewer chapters, 3 points per chapter in each section
+    else:
+        return 2  # For more than 2 chapters, 2 points per chapter in each section
 
-print("TEST PRINT LINE 58")
-if 'quiz' not in st.session_state:
-    st.session_state['quiz'] = None
-if 'user_answers' not in st.session_state:
-    st.session_state['user_answers'] = {}
-if 'correct_answers' not in st.session_state:
-    st.session_state['correct_answers'] = []
-print("TEST PRINT LINE 66")
-# File uploader and input fields
-uploaded_file = st.file_uploader("Upload a PDF or txt file")
-mcq_count = st.number_input("No. of MCQs", min_value=3, max_value=50)
-grade = st.number_input("Insert Grade", min_value=1, max_value=10)
-tone = st.text_input("Insert Quiz Tone", max_chars=100, placeholder="simple")
-print("TEST PRINT LINE 72")
-# Create MCQs button
-if st.button("Create MCQs") and uploaded_file is not None and mcq_count:
-    with st.spinner(".."):
-        try:
-            text = parse_file(uploaded_file)
-            with get_openai_callback() as cb:
-                response = generate_evaluate_chain(
-                    {
-                        "text": text,
-                        "number": mcq_count,
-                        "grade": grade,
-                        "tone": tone,
-                        "response_json": json.dumps(RESPONSE_JSON)
-                    }
+
+
+st.title("Customizable Cumulative Lesson Plan Generator")
+
+
+if 'chapter_names' not in st.session_state:
+    st.session_state['chapter_names'] = []
+if 'cumulative_lesson_plan' not in st.session_state:
+    st.session_state['cumulative_lesson_plan'] = None
+
+uploaded_file = st.file_uploader("Upload a PDF file with chapter names")
+
+
+if uploaded_file and uploaded_file.type == "application/pdf":
+    try:
+        st.session_state['chapter_names'] = parse_file(uploaded_file)
+    except Exception as e:
+        st.error("Error reading the file. Please upload a valid PDF with chapter names.")
+        traceback.print_exception(type(e), e, e.__traceback__)
+
+
+if st.session_state['chapter_names']:
+    st.write("### Select Chapters to Include in the Lesson Plan")
+    selected_chapters = []
+    for chapter in st.session_state['chapter_names']:
+        if st.checkbox(chapter):
+            selected_chapters.append(chapter)
+
+
+    if st.button("Generate Cumulative Lesson Plan") and selected_chapters:
+        with st.spinner("Generating cumulative lesson plan..."):
+            try:
+
+                points_per_chapter = calculate_points(len(selected_chapters))
+                chapters_text = "\n".join(selected_chapters)
+
+
+                cumulative_lesson_plan_prompt = PromptTemplate(
+                    input_variables=["chapters", "bridge_points", "objectives_points", "pre_assessment_points",
+                                     "activities_points", "post_assessment_points", "summary_points"],
+                    template=cumulative_lesson_plan_prompt_template
                 )
-        except Exception as e:
-            traceback.print_exception(type(e), e, e.__traceback__)
-            st.error("r")
-        else:
-            if isinstance(response, dict):
-                st.session_state['quiz'] = response.get("quiz", None)
-                st.session_state['correct_answers'] = []  # Reset correct_answers when new quiz is created
-print("TEST PRINT LINE 95")
-# Display quiz and store user answers
-# Display quiz and store user answers
-# Display quiz and store user answers
-# Display quiz and store user answers
-# Display quiz and store user answers
-# Display quiz and store user answers
-if st.session_state['quiz'] is not None:
-    table_data = get_table_data(st.session_state['quiz'])
-    # Create a form container
-    with st.form(key="quiz_form"):
-        for i, data in enumerate(table_data):
-            st.write(f"{i + 1}. {data['MCQ']}")
-            options = data['Choices'].split(' | ')
-            correct_option = data['Correct']
-            # Use a unique key for each radio button
-            selected_option = st.radio("", options, key=f"question {i}", index=None)
-        # Add a submit button
-        submit = st.form_submit_button("Submit answers")
-    # Check if the submit button was clicked
-    if submit:
-        # Convert the values of the radio buttons to strings
-        user_answers = [str(st.session_state[f"question {i}"]) for i in range(len(table_data))]
-        # Convert the values of 'Correct' for each MCQ to strings
-        correct_answers = [str(data['Correct']) for data in table_data]
-        # Initialize a counter for the number of matches
-        matches = 0
-        # Loop through the arrays using the same index
-        for i in range(len(correct_answers)):
-            # Check if the correct_answer is a substring of the user_answer
-            if correct_answers[i] in user_answers[i]:
-                # If yes, increment the counter by one
-                matches += 1
-        # Print the number of matches in the terminal
-        print(matches)
-        st.write(f"You have selected {matches} correct answers.")
-        # Or print the number of matches in the app
-        # st.write(matches)
 
 
+                lesson_plan_chain = LLMChain(llm=llm, prompt=cumulative_lesson_plan_prompt,
+                                             output_key="cumulative_lesson_plan", verbose=True)
+
+                response = lesson_plan_chain({
+                    "chapters": chapters_text,
+                    "bridge_points": points_per_chapter,
+                    "objectives_points": points_per_chapter,
+                    "pre_assessment_points": points_per_chapter,
+                    "activities_points": points_per_chapter,
+                    "post_assessment_points": points_per_chapter,
+                    "summary_points": points_per_chapter
+                })
+
+                st.session_state['cumulative_lesson_plan'] = response['cumulative_lesson_plan']
+                st.session_state['selected_chapter_names'] = ", ".join(selected_chapters)
+            except Exception as e:
+                st.error("Error occurred while generating the lesson plan.")
+                traceback.print_exception(type(e), e, e.__traceback__)
+            else:
+                st.success("Cumulative lesson plan generated successfully!")
 
 
+if st.session_state['cumulative_lesson_plan']:
+    st.write(f"### Cumulative Lesson Plan for: {st.session_state['selected_chapter_names']}")
+    st.markdown(st.session_state['cumulative_lesson_plan'])
 
 
-
-
-
-
+    st.download_button(
+        label="Download Cumulative Lesson Plan",
+        data=st.session_state['cumulative_lesson_plan'],
+        file_name="cumulative_lesson_plan.txt",
+        mime="text/plain"
+    )

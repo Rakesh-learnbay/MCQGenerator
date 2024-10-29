@@ -1,5 +1,4 @@
 import PyPDF2
-import json
 from dotenv import load_dotenv
 import os
 
@@ -7,69 +6,38 @@ load_dotenv()
 
 
 def parse_file(file):
-    MAX_TOKENS = 16384
+    """
+    Extract chapter names from a PDF file.
+
+    Parameters:
+        file: Uploaded file object in Streamlit.
+
+    Returns:
+        List of chapter names found in the file.
+    """
+    chapter_titles = []
+
     if file.name.endswith(".pdf"):
         try:
             pdf_reader = PyPDF2.PdfReader(file)
             text = ""
             for page in pdf_reader.pages:
-                text += page.extract_text()
 
-            # Split the text into chunks of maximum token length
-            chunked_text = [text[i:i + MAX_TOKENS] for i in range(0, len(text), MAX_TOKENS)]
+                text += page.extract_text() or ""
 
-            return chunked_text
-        except PyPDF2.utils.PdfReadError:
-            raise Exception("Error reading the PDF file.")
-    elif file.name.endswith(".txt"):
-        text = file.read().decode("utf-8")
-        # Split the text into chunks of maximum token length
-        chunked_text = [text[i:i + MAX_TOKENS] for i in range(0, len(text), MAX_TOKENS)]
-        return chunked_text
+
+            lines = text.splitlines()
+            for line in lines:
+
+                if line.strip() and line[0].isdigit() and "." in line:
+                    chapter_titles.append(line.strip())
+
+            if not chapter_titles:
+                raise Exception("No chapter titles found in the PDF file.")
+
+            return chapter_titles
+
+        except Exception as e:
+            raise Exception(f"Error reading the PDF file: {e}")
     else:
-        raise Exception("Unsupported File Format. Only PDF and .Txt Files are supported")
-
-
-RESPONSE_JSON = {
-    "1": {
-        "no": "1",
-        "mcq": "multiple choice question",
-        "options": {
-            "a": "choice here",
-            "b": "choice here",
-            "c": "choice here",
-            "d": "choice here",
-        },
-        "correct": "correct answer",
-    },
-    "2": {
-        "no": "2",
-        "mcq": "multiple choice question",
-        "options": {
-            "a": "choice here",
-            "b": "choice here",
-            "c": "choice here",
-            "d": "choice here",
-        },
-        "correct": "correct answer",
-    },
-}
-
-
-def get_table_data(quiz_str):
-    try:
-        quiz_dict = json.loads(quiz_str)
-        quiz_table_data = []
-        for key, value in quiz_dict.items():
-            mcq = value["mcq"]
-            options = " | ".join(
-                [
-                    f"{option}: {option_value}"
-                    for option, option_value in value["options"].items()
-                ]
-            )
-            correct = value["correct"]
-            quiz_table_data.append({"MCQ": mcq, "Choices": options, "Correct": correct})
-        return quiz_table_data
-    except Exception as e:
-        return False
+        raise Exception("Unsupported File Format. Only PDF files are supported.")
